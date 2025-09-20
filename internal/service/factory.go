@@ -6,24 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"testStand/internal/acquirer/asupayme"
 
+	json "github.com/json-iterator/go"
+	"github.com/labstack/gommon/log"
 	"testStand/internal/acquirer"
 	"testStand/internal/acquirer/auris"
 	"testStand/internal/acquirer/paylink"
 	"testStand/internal/acquirer/sequoia"
 	"testStand/internal/models"
 	"testStand/internal/repos"
-
-	json "github.com/json-iterator/go"
-	"github.com/labstack/gommon/log"
 )
 
 var ErrUnsupportedAcquirer = errors.New("unsupported acquirer")
 
 const (
-	AURIS   = "auris"
-	SEQUOIA = "sequoia"
-	PAYLINK = "paylink"
+	AURIS    = "auris"
+	SEQUOIA  = "sequoia"
+	PAYLINK  = "paylink"
+	ASUPAYME = "asupayme"
 )
 
 type Factory struct {
@@ -78,8 +79,13 @@ func (f *Factory) create(ctx context.Context, txn *models.Transaction, gateway *
 	}
 
 	switch gateway.Adapter {
-	//case FAKE_BANK:
-	//	acq = &fake.Acquirer{}
+	case ASUPAYME:
+		var chParams asupayme.ChannelCredentials
+		var gtwParams asupayme.GatewayParams
+		if err = f.unmarshalParams(gateway.ParamsJson, channelParams.Credentials, &gtwParams, &chParams); err != nil {
+			return nil, err
+		}
+		acq = asupayme.NewAcquirer(ctx, f.dbClient, &chParams, &gtwParams)
 	case AURIS:
 		var chParams auris.ChannelParams
 		var gtwParams auris.GatewayParams

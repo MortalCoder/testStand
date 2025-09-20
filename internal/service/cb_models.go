@@ -43,3 +43,9 @@ type Sequoia struct {
 	PaymentType int             `json:"payment_type"`
 	Status      string          `json:"status"`
 }
+
+type Asupayme struct {
+	Status          int    `json:"status"`
+	ConfirmedAmount string `json:"confirmed_amount"`
+	WithdrawID      string `json:"withdraw_id"`
+}

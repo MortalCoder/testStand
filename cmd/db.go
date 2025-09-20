@@ -7,7 +7,7 @@ import (
 )
 
 func PostgresConnection() *sql.DB {
-	connectionString := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", "localhost", "5432", "postgres", "asdfg", "acq")
+	connectionString := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", "localhost", "5433", "postgres", "NewPass123", "acq")
 
 	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
