@@ -4,53 +4,62 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"time"
+	"testStand/internal/acquirer/helper"
 )
 
 type Client struct {
 	baseAddress string
-	http        *http.Client
+	client      *http.Client
+
+	apiKey    string
+	merchant  string
+	secretKey string
 }
 
-func NewClient(baseAddress string, timeout time.Duration) *Client {
-	if timeout <= 0 {
-		timeout = 20 * time.Second
-	}
+const (
+	payout = "/withdraw"
+)
+
+func NewClient(baseAddress string, merchant string, apiKey string, secretKey string, timeout *int) *Client {
+	client := http.DefaultClient
 	return &Client{
 		baseAddress: baseAddress,
-		http:        &http.Client{Timeout: timeout},
+		client:      client,
+		merchant:    merchant,
+		apiKey:      apiKey,
+		secretKey:   secretKey,
 	}
 }
 
-func (c *Client) MakePayout(ctx context.Context, apiKey string, req *WithdrawRequest) (*WithdrawResponse, error) {
-	body, _ := json.Marshal(req)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseAddress+"/withdraw", bytes.NewReader(body))
+func (c *Client) MakePayout(ctx context.Context, req *Request) (*Response, error) {
+	resp := &Response{}
+	err := c.makeRequest(ctx, req, resp, c.apiKey, payout)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Api-key", apiKey)
-	httpReq.Header.Set("Merchant", req.Merchant)
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	return resp, nil
+}
 
-	httpResp, err := c.http.Do(httpReq)
+// makeRequest
+func (c *Client) makeRequest(ctx context.Context, payload any, outResponse any, apiKey string, endpoint string) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		b, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("asupayme: http %d, body=%s", httpResp.StatusCode, string(b))
+		return err
 	}
 
-	var out WithdrawResponse
-	if err := json.NewDecoder(httpResp.Body).Decode(&out); err != nil {
-		return nil, err
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, helper.JoinUrl(c.baseAddress, endpoint), bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
-	return &out, nil
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Api-key", apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return json.NewDecoder(resp.Body).Decode(outResponse)
 }

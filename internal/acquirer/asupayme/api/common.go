@@ -12,7 +12,7 @@ type CardData struct {
 	ExpiredYear  string `json:"expired_year"`
 }
 
-type WithdrawRequest struct {
+type Request struct {
 	Merchant   string   `json:"merchant"`
 	WithdrawID string   `json:"withdraw_id"`
 	CardData   CardData `json:"card_data"`
@@ -21,15 +21,26 @@ type WithdrawRequest struct {
 	Payload    any      `json:"payload,omitempty"`
 }
 
-type WithdrawResponse struct {
-	Status string `json:"status"`
-	ID     string `json:"id"`
+type Response struct {
+	Status   string           `json:"status"`
+	ID       string           `json:"id"`
+	Detail   string           `json:"detail,omitempty"`
+	Code     string           `json:"code,omitempty"`
+	Messages []map[string]any `json:"messages,omitempty"`
+	HTTPCode int              `json:"-"`
+	RawBody  string           `json:"-"`
 }
 
-type CallbackPayload struct {
+type Callback struct {
 	Status          int    `json:"status"`
 	ConfirmedAmount string `json:"confirmed_amount"`
 	WithdrawID      string `json:"withdraw_id"`
+}
+
+type StatusRequest struct {
+	Id      string `json:"id"`
+	MerchId string `json:"merch_id"`
+	UserRef string `json:"user_ref,omitempty"`
 }
 
 func Sign256(concatenated string) string {

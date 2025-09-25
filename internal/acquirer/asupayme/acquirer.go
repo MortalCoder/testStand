@@ -2,14 +2,10 @@ package asupayme
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"strconv"
-	"time"
-
 	"testStand/internal/acquirer"
 	"testStand/internal/acquirer/asupayme/api"
+	"testStand/internal/acquirer/helper"
 	"testStand/internal/models"
 	"testStand/internal/repos"
 )
@@ -17,122 +13,130 @@ import (
 type GatewayParams struct {
 	Transport struct {
 		BaseAddress string `json:"base_address"`
-		TimeoutSec  *int   `json:"timeout,omitempty"`
+		TimeoutSec  *int   `json:"timeout"`
 	} `json:"transport"`
 }
 
-type ChannelCredentials struct {
+type ChannelParams struct {
 	APIKey    string `json:"api_key"`
 	MerchID   string `json:"merch_id"`
 	SecretKey string `json:"secret_key"`
 }
 
 type Acquirer struct {
-	api   *api.Client
-	db    *repos.Repo
-	creds ChannelCredentials
+	api           *api.Client
+	db            *repos.Repo
+	channelParams ChannelParams
+	callbackUrl   string
 }
 
-func NewAcquirer(_ context.Context, db *repos.Repo, chCreds *ChannelCredentials, gw *GatewayParams) *Acquirer {
-	t := 20 * time.Second
-	if gw.Transport.TimeoutSec != nil && *gw.Transport.TimeoutSec > 0 {
-		t = time.Duration(*gw.Transport.TimeoutSec) * time.Second
-	}
+func NewAcquirer(_ context.Context, db *repos.Repo, channelParams *ChannelParams, gatewayParams *GatewayParams) *Acquirer {
+
 	return &Acquirer{
-		api:   api.NewClient(gw.Transport.BaseAddress, t),
-		db:    db,
-		creds: *chCreds,
+		api:           api.NewClient(gatewayParams.Transport.BaseAddress, channelParams.MerchID, channelParams.APIKey, channelParams.SecretKey, gatewayParams.Transport.TimeoutSec),
+		db:            db,
+		channelParams: *channelParams,
 	}
 }
 
 func (a *Acquirer) Payout(ctx context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
 	card := api.CardData{
-		OwnerName:    "",
-		CardNumber:   txn.PaymentData.Object.Credentials,
-		ExpiredMonth: txn.PaymentData.Object.ExpMonth,
-		ExpiredYear:  txn.PaymentData.Object.ExpYear,
-	}
-	if card.CardNumber == "" || card.ExpiredMonth == "" || card.ExpiredYear == "" {
-		return &acquirer.TransactionStatus{
-			Status: acquirer.REJECTED,
-			Info:   map[string]string{"ps_error_code": "BAD_CARD_DATA"},
-		}, nil
+		OwnerName:  txn.Customer.FullName,
+		CardNumber: txn.PaymentData.Object.Credentials,
 	}
 
-	amount := strconv.FormatInt(txn.TxnAmountSrc, 10)
-	withdrawID := fmt.Sprintf("txn-%d", txn.TxnId)
-
-	req := &api.WithdrawRequest{
-		Merchant:   a.creds.MerchID,
-		WithdrawID: withdrawID,
+	req := &api.Request{
+		Merchant:   a.channelParams.MerchID,
+		WithdrawID: strconv.FormatInt(txn.TxnId, 10),
 		CardData:   card,
-		Amount:     amount,
-		Signature:  api.Sign256(a.creds.MerchID + card.CardNumber + amount + a.creds.SecretKey),
+		Amount:     strconv.FormatInt(txn.TxnAmountSrc, 10),
+		Signature:  api.Sign256(a.channelParams.MerchID + card.CardNumber + strconv.FormatInt(txn.TxnAmountSrc, 10) + a.channelParams.SecretKey),
 	}
 
-	resp, err := a.api.MakePayout(ctx, a.creds.APIKey, req)
+	resp, err := a.api.MakePayout(ctx, req)
+
 	if err != nil {
 		return nil, err
 	}
 
-	tr := &acquirer.TransactionStatus{Status: acquirer.PENDING}
+	tr := &acquirer.TransactionStatus{}
 
-	if resp != nil && resp.ID != "" {
-		tr.GtwTxnId = &resp.ID
-	} else {
-		wid := fmt.Sprintf("txn-%d", txn.TxnId)
-		tr.GtwTxnId = &wid
+	if resp.Status != "" && resp.Status != "success" {
+		tr.Status = acquirer.REJECTED
+		return tr, nil
 	}
+
+	/*
+		if resp.HTTPCode < 200 || resp.HTTPCode >= 300 {
+			tr.Status = acquirer.REJECTED
+			tr.Info = map[string]string{
+				"ps_error_code": api.FirstNonEmpty(resp.Code, strconv.Itoa(resp.HTTPCode)),
+				"ps_message":    resp.Detail,
+			}
+			return tr, nil
+		}
+
+		tr.GtwTxnId = &resp.ID
+	*/
+
+	tr.Status = acquirer.PENDING
+	tr.GtwTxnId = &resp.ID
 
 	return tr, nil
 }
 
 func (a *Acquirer) HandleCallback(_ context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
-	raw, ok := txn.TxnInfo["callback"]
-	if !ok {
-		return nil, errors.New("asupayme: callback body missing")
-	}
-	var cb api.CallbackPayload
-	if err := json.Unmarshal([]byte(raw), &cb); err != nil {
-		return nil, err
-	}
+	/*
+		logger := log.New("dev")
 
-	tr := &acquirer.TransactionStatus{
-		Info: map[string]string{
-			"confirmed_amount": cb.ConfirmedAmount,
-			"withdraw_id":      cb.WithdrawID,
-		},
-	}
-
-	switch cb.Status {
-	case 9:
-		tr.Status = acquirer.APPROVED
-		if cb.ConfirmedAmount != "" {
-			tr.Info["ps_amount"] = cb.ConfirmedAmount
+		callbackBody, ok := txn.TxnInfo["callback"]
+		if !ok {
+			return nil, errors.New("asupayme: callback body missing")
 		}
-	case -1:
-		tr.Status = acquirer.REJECTED
-	default:
-		tr.Status = acquirer.PENDING
-	}
-	return tr, nil
+
+		callback := api.Callback{}
+		if err := json.Unmarshal([]byte(callbackBody), &callback); err != nil {
+			logger.Error("Invalid callback - ", callbackBody)
+			return nil, err
+		}
+
+		tr := &acquirer.TransactionStatus{
+			Info: map[string]string{
+				"confirmed_amount": callback.ConfirmedAmount,
+				"withdraw_id":      callback.WithdrawID,
+			},
+		}
+
+		return handleStatus(tr, callback.Status)
+	*/
+	return helper.UnsupportedMethodError()
 }
 
 // заглушка
 func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
-	return &acquirer.TransactionStatus{
-		Status: acquirer.REJECTED,
-		Info: map[string]string{
-			"ps_error_code": "NOT_IMPLEMENTED",
-			"ps_message":    "AsuPayme: payment is not supported",
-		},
-	}, nil
+	return helper.UnsupportedMethodError()
 }
 
-// заглушка
 func (a *Acquirer) FinalizePending(ctx context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
-	return &acquirer.TransactionStatus{
-		Status: acquirer.PENDING,
-		Info:   map[string]string{"ps_message": "AsuPayme: awaiting callback; finalize not supported"},
-	}, nil
+	/*
+		return &acquirer.TransactionStatus{
+			Status: acquirer.PENDING,
+			Info:   map[string]string{"ps_message": "AsuPayme: finalize via callback; no status endpoint"},
+		}, nil
+	*/
+	return helper.UnsupportedMethodError()
+}
+
+func handleStatus(tr *acquirer.TransactionStatus, status int) (*acquirer.TransactionStatus, error) {
+	switch status {
+	case 9:
+		tr.Status = acquirer.APPROVED
+		return tr, nil
+	case -1:
+		tr.Status = acquirer.REJECTED
+		return tr, nil
+	default:
+		tr.Status = acquirer.PENDING
+		return tr, nil
+	}
 }

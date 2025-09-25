@@ -80,7 +80,7 @@ func (f *Factory) create(ctx context.Context, txn *models.Transaction, gateway *
 
 	switch gateway.Adapter {
 	case ASUPAYME:
-		var chParams asupayme.ChannelCredentials
+		var chParams asupayme.ChannelParams
 		var gtwParams asupayme.GatewayParams
 		if err = f.unmarshalParams(gateway.ParamsJson, channelParams.Credentials, &gtwParams, &chParams); err != nil {
 			return nil, err
