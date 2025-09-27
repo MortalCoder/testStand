@@ -31,18 +31,6 @@ type Response struct {
 	RawBody  string           `json:"-"`
 }
 
-type Callback struct {
-	Status          int    `json:"status"`
-	ConfirmedAmount string `json:"confirmed_amount"`
-	WithdrawID      string `json:"withdraw_id"`
-}
-
-type StatusRequest struct {
-	Id      string `json:"id"`
-	MerchId string `json:"merch_id"`
-	UserRef string `json:"user_ref,omitempty"`
-}
-
 func Sign256(concatenated string) string {
 	sum := sha256.Sum256([]byte(concatenated))
 	return hex.EncodeToString(sum[:])

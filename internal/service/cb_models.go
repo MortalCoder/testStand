@@ -49,3 +49,11 @@ type Asupayme struct {
 	ConfirmedAmount string `json:"confirmed_amount"`
 	WithdrawID      string `json:"withdraw_id"`
 }
+
+type Alpex struct {
+	ID          string `json:"_id"`
+	Status      string `json:"status"`
+	ExternalID  string `json:"external_id"`
+	Description string `json:"description"`
+	Signature   string `json:"signature"`
+}

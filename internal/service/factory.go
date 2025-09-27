@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"testStand/internal/acquirer/alpex"
 	"testStand/internal/acquirer/asupayme"
 
 	json "github.com/json-iterator/go"
@@ -25,6 +26,7 @@ const (
 	SEQUOIA  = "sequoia"
 	PAYLINK  = "paylink"
 	ASUPAYME = "asupayme"
+	ALPEX    = "alpex"
 )
 
 type Factory struct {
@@ -79,6 +81,13 @@ func (f *Factory) create(ctx context.Context, txn *models.Transaction, gateway *
 	}
 
 	switch gateway.Adapter {
+	case ALPEX:
+		var chParams alpex.ChannelParams
+		var gtwParams alpex.GatewayParams
+		if err = f.unmarshalParams(gateway.ParamsJson, channelParams.Credentials, &gtwParams, &chParams); err != nil {
+			return nil, err
+		}
+		acq = alpex.NewAcquirer(ctx, f.dbClient, &chParams, &gtwParams, "https://webhook.site/af5e65bc-2cea-42a6-a5db-f6adaedbdfe5")
 	case ASUPAYME:
 		var chParams asupayme.ChannelParams
 		var gtwParams asupayme.GatewayParams
