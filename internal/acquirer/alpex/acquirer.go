@@ -46,7 +46,7 @@ func NewAcquirer(ctx context.Context, db *repos.Repo, channelParams *ChannelPara
 	}
 }
 
-// Payment — direction=BUY
+// Payment
 func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
 	request := &api.Request{
 		FiatSymbol:   strings.ToUpper(txn.TxnCurrencySrc),
@@ -77,7 +77,7 @@ func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acqui
 	return tr, nil
 }
 
-// Payout — direction=SELL
+// Payout
 func (a *Acquirer) Payout(ctx context.Context, txn *models.Transaction) (*acquirer.TransactionStatus, error) {
 	request := &api.Request{
 		FiatSymbol:   strings.ToUpper(txn.TxnCurrencySrc),
