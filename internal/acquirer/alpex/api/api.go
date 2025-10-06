@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"testStand/internal/acquirer/helper"
 )
 
@@ -56,16 +55,15 @@ func (c *Client) ensureToken(ctx context.Context) error {
 		return fmt.Errorf("auth failed: %s", res.Status)
 	}
 
-	var outResponse struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&outResponse); err != nil {
+	var out map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return err
 	}
-	if outResponse.AccessToken == "" {
-		return fmt.Errorf("empty access_token")
+	key := out["access_token"]
+	if key == "" {
+		return fmt.Errorf("empty access_token in response")
 	}
-	c.apikey = outResponse.AccessToken
+	c.apikey = key
 	return nil
 }
 
@@ -88,13 +86,9 @@ func (c *Client) CreateOffer(ctx context.Context, reqBody *Request) (*Response, 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("alpex %s: %s", resp.Status, strings.TrimSpace(string(b)))
-	}
+	b, _ := io.ReadAll(resp.Body)
 	var outResponse Response
-	if err := json.NewDecoder(resp.Body).Decode(&outResponse); err != nil {
-		return nil, err
-	}
+	_ = json.Unmarshal(b, &outResponse)
+
 	return &outResponse, nil
 }

@@ -26,6 +26,9 @@ type Response struct {
 	Status        string         `json:"status"`
 	ExternalID    string         `json:"external_id"`
 	PaymentMethod *PaymentMethod `json:"payment_method"`
+	ApproveCode   string         `json:"approve_code"`
+	Error         string         `json:"error"`
+	Message       string         `json:"message"`
 }
 
 func (r *Response) IDPtr() *string {

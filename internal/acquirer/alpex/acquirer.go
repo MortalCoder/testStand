@@ -2,9 +2,11 @@ package alpex
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/labstack/gommon/log"
 	"strconv"
 	"strings"
@@ -24,9 +26,10 @@ type Transport struct {
 }
 
 type ChannelParams struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	GateId   string `json:"gate_id"`
+	Email        string `json:"email"`
+	Password     string `json:"password"`
+	GateId       string `json:"gate_id"`
+	SignatureKey string `json:"signature_key"`
 }
 
 type Acquirer struct {
@@ -53,7 +56,7 @@ func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acqui
 		FiatAmount:   strconv.FormatInt(txn.TxnAmountSrc, 10),
 		CustomerName: txn.Customer.FullName,
 		Direction:    api.Payment,
-		ExternalID:   fmt.Sprintf("%d", txn.TxnId),
+		ExternalID:   strconv.FormatInt(txn.TxnId, 10),
 		GateID:       a.channelParams.GateId,
 		WebhookURL:   a.callbackUrl,
 	}
@@ -67,6 +70,20 @@ func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acqui
 		GtwTxnId: response.IDPtr(),
 		Status:   acquirer.PENDING,
 	}
+
+	if msg := firstNonEmpty(response.Message, response.Error); msg != "" {
+		if tr.Info == nil {
+			tr.Info = map[string]string{}
+		}
+		tr.Info["ps_error_message"] = msg
+	}
+	if response.ApproveCode != "" {
+		if tr.Info == nil {
+			tr.Info = map[string]string{}
+		}
+		tr.Info["ps_approve_code"] = response.ApproveCode
+	}
+
 	if response.PaymentMethod != nil {
 		tr.Outputs = map[string]string{
 			"credentials": response.PaymentMethod.Address,
@@ -85,7 +102,7 @@ func (a *Acquirer) Payout(ctx context.Context, txn *models.Transaction) (*acquir
 		CustomerName: txn.Customer.FullName,
 		CustomerAddr: txn.Customer.Address,
 		Direction:    api.Payout,
-		ExternalID:   fmt.Sprintf("%d", txn.TxnId),
+		ExternalID:   strconv.FormatInt(txn.TxnId, 10),
 		GateID:       a.channelParams.GateId,
 		WebhookURL:   a.callbackUrl,
 	}
@@ -98,6 +115,19 @@ func (a *Acquirer) Payout(ctx context.Context, txn *models.Transaction) (*acquir
 	tr := &acquirer.TransactionStatus{
 		GtwTxnId: response.IDPtr(),
 		Status:   acquirer.PENDING,
+	}
+
+	if msg := firstNonEmpty(response.Message, response.Error); msg != "" {
+		if tr.Info == nil {
+			tr.Info = map[string]string{}
+		}
+		tr.Info["ps_error_message"] = msg
+	}
+	if response.ApproveCode != "" {
+		if tr.Info == nil {
+			tr.Info = map[string]string{}
+		}
+		tr.Info["ps_approve_code"] = response.ApproveCode
 	}
 
 	if response.PaymentMethod != nil {
@@ -125,6 +155,21 @@ func (a *Acquirer) HandleCallback(ctx context.Context, txn *models.Transaction) 
 		return nil, err
 	}
 
+	key := strings.TrimSpace(a.channelParams.SignatureKey)
+	if key != "" {
+		if strings.TrimSpace(callback.Signature) == "" {
+			return nil, errors.New("missing callback signature")
+		}
+
+		mac := hmac.New(sha256.New, []byte(key))
+		mac.Write([]byte("id=" + callback.ID + "\nstatus=" + callback.Status))
+		expected := hex.EncodeToString(mac.Sum(nil))
+		if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(callback.Signature))) {
+			logger.Error("invalid signature for callback")
+			return nil, errors.New("invalid signature")
+		}
+	}
+
 	tr := &acquirer.TransactionStatus{}
 	if callback.Description != "" {
 		tr.Info = map[string]string{"ps_error_code": callback.Description}
@@ -149,4 +194,14 @@ func handleStatus(tr *acquirer.TransactionStatus, status string) (*acquirer.Tran
 		tr.Status = acquirer.PENDING
 		return tr, nil
 	}
+}
+
+// HELPER
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
