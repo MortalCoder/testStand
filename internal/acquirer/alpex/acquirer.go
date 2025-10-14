@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testStand/internal/acquirer"
 	"testStand/internal/acquirer/alpex/api"
+	"testStand/internal/acquirer/helper"
 	"testStand/internal/models"
 	"testStand/internal/repos"
 )
@@ -41,12 +42,18 @@ type Acquirer struct {
 
 // NewAcquirer
 func NewAcquirer(ctx context.Context, db *repos.Repo, channelParams *ChannelParams, gatewayParams *GatewayParams, callbackUrl string) *Acquirer {
-	return &Acquirer{
+	a := &Acquirer{
 		channelParams: channelParams,
-		api:           api.NewClient(ctx, gatewayParams.Transport.BaseAddress, channelParams.Email, channelParams.Password, gatewayParams.Transport.Timeout),
+		api:           api.NewClient(ctx, gatewayParams.Transport.BaseAddress, channelParams.Email, channelParams.Password),
 		dbClient:      db,
 		callbackUrl:   callbackUrl,
 	}
+
+	if err := a.api.GenerateSignature(ctx); err != nil {
+		log.Errorf("alpex: cannot obtain signature key at init: %v", err)
+	}
+
+	return a
 }
 
 // Payment
@@ -71,12 +78,10 @@ func (a *Acquirer) Payment(ctx context.Context, txn *models.Transaction) (*acqui
 		Status:   acquirer.PENDING,
 	}
 
-	if msg := firstNonEmpty(response.Message, response.Error); msg != "" {
-		if tr.Info == nil {
-			tr.Info = map[string]string{}
-		}
-		tr.Info["ps_error_message"] = msg
+	if response.Error != "" {
+		tr.Info = map[string]string{"ps_error_message": response.Error}
 	}
+
 	if response.ApproveCode != "" {
 		if tr.Info == nil {
 			tr.Info = map[string]string{}
@@ -117,11 +122,8 @@ func (a *Acquirer) Payout(ctx context.Context, txn *models.Transaction) (*acquir
 		Status:   acquirer.PENDING,
 	}
 
-	if msg := firstNonEmpty(response.Message, response.Error); msg != "" {
-		if tr.Info == nil {
-			tr.Info = map[string]string{}
-		}
-		tr.Info["ps_error_message"] = msg
+	if response.Error != "" {
+		tr.Info = map[string]string{"ps_error_message": response.Error}
 	}
 	if response.ApproveCode != "" {
 		if tr.Info == nil {
@@ -155,19 +157,16 @@ func (a *Acquirer) HandleCallback(ctx context.Context, txn *models.Transaction) 
 		return nil, err
 	}
 
-	key := strings.TrimSpace(a.channelParams.SignatureKey)
-	if key != "" {
-		if strings.TrimSpace(callback.Signature) == "" {
-			return nil, errors.New("missing callback signature")
-		}
+	key := strings.TrimSpace(a.api.GetSignature())
+	if key == "" {
+		return nil, errors.New("alpex: signature key is missing")
+	}
 
-		mac := hmac.New(sha256.New, []byte(key))
-		mac.Write([]byte("id=" + callback.ID + "\nstatus=" + callback.Status))
-		expected := hex.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(callback.Signature))) {
-			logger.Error("invalid signature for callback")
-			return nil, errors.New("invalid signature")
-		}
+	expected := helper.GenerateHMAC(sha256.New, []byte("id="+callback.ID+"\nstatus="+callback.Status), key)
+
+	got, err := hex.DecodeString(callback.Signature)
+	if err != nil || !hmac.Equal(got, expected) {
+		return nil, errors.New("invalid signature")
 	}
 
 	tr := &acquirer.TransactionStatus{}
@@ -194,14 +193,4 @@ func handleStatus(tr *acquirer.TransactionStatus, status string) (*acquirer.Tran
 		tr.Status = acquirer.PENDING
 		return tr, nil
 	}
-}
-
-// HELPER
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"strings"
 	"testStand/internal/acquirer/helper"
 )
 
@@ -16,14 +16,16 @@ type Client struct {
 	password    string
 	apikey      string
 	client      *http.Client
+	secret      string
 }
 
 const (
-	login = "/auth/login"
-	offer = "/offer/external"
+	login  = "/auth/login"
+	offer  = "/offer/external"
+	secret = "/user/generate-signature-key"
 )
 
-func NewClient(ctx context.Context, baseAddress, email, password string, timeout *int) *Client {
+func NewClient(ctx context.Context, baseAddress, email, password string) *Client {
 	c := http.DefaultClient
 	return &Client{
 		baseAddress: baseAddress,
@@ -31,6 +33,35 @@ func NewClient(ctx context.Context, baseAddress, email, password string, timeout
 		password:    password,
 		client:      c,
 	}
+}
+
+func (c *Client) GenerateSignature(ctx context.Context) error {
+	if err := c.ensureToken(ctx); err != nil {
+		return err
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, helper.JoinUrl(c.baseAddress, secret), http.NoBody)
+	req.Header.Set("Authorization", "Bearer "+c.apikey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var out map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	key := strings.TrimSpace(out["signature_key"])
+	if key == "" {
+		return fmt.Errorf("alpex: empty signature_key")
+	}
+	c.secret = key
+	return nil
+}
+
+func (c *Client) GetSignature() string {
+	return c.secret
 }
 
 // ensureToken — логин
@@ -86,9 +117,9 @@ func (c *Client) CreateOffer(ctx context.Context, reqBody *Request) (*Response, 
 	}
 	defer resp.Body.Close()
 
-	b, _ := io.ReadAll(resp.Body)
 	var outResponse Response
-	_ = json.Unmarshal(b, &outResponse)
-
+	if err := json.NewDecoder(resp.Body).Decode(&outResponse); err != nil {
+		return nil, err
+	}
 	return &outResponse, nil
 }

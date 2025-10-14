@@ -87,7 +87,7 @@ func (f *Factory) create(ctx context.Context, txn *models.Transaction, gateway *
 		if err = f.unmarshalParams(gateway.ParamsJson, channelParams.Credentials, &gtwParams, &chParams); err != nil {
 			return nil, err
 		}
-		acq = alpex.NewAcquirer(ctx, f.dbClient, &chParams, &gtwParams, "https://webhook.site/af5e65bc-2cea-42a6-a5db-f6adaedbdfe5")
+		acq = alpex.NewAcquirer(ctx, f.dbClient, &chParams, &gtwParams, "https://webhook.site/69a967d5-36e7-4d35-a0e1-256c5626ac54")
 	case ASUPAYME:
 		var chParams asupayme.ChannelParams
 		var gtwParams asupayme.GatewayParams
